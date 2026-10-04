@@ -1,13 +1,13 @@
 # Engine shutdown and MCP HTTP responses for Syzygy
 
-Upstream baseline: `d5ae0f18f2170f10d30880cb7d21fb0880410e7b`, two documentation
-commits after the `v0.9.3` tag (`24dbf5c256f232176ee5949485ba264049407fbe`).
-The SDK and its sibling crates remain at 0.9.3. No model algorithm, scheduler,
-or tensor implementation is changed.
+Upstream baseline: [v0.9.4](https://github.com/EricLBuehler/mistral.rs/releases/tag/v0.9.4), commit
+`4400935451da5e2dc7379a3f92fbbada66557f6c`, the latest stable release checked
+on 2026-10-04. The SDK and its sibling crates remain at 0.9.4. No model
+algorithm, scheduler, or tensor implementation is changed by these patches.
 
 ## Problem and boundary
 
-`MistralRs` privately owns each native `std::thread::JoinHandle`. Upstream 0.9.3
+`MistralRs` privately owns each native `std::thread::JoinHandle`. Upstream 0.9.4
 provides asynchronous `shutdown(self: Arc<Self>)`, but requires exclusive Arc
 ownership, performs blocking joins on its async caller, and does not return
 native join failures. Remove/unload/reboot can discard a handle without joining
@@ -95,6 +95,8 @@ mbx clippy -p syzygy-local-llm -p syzygy-backend-ai --all-targets -- -D warnings
 
 The engine patch is tracked under `20260915-LOCAL-LLM-RUNTIME-OWNER` and upstream
 [PR #2428](https://github.com/EricLBuehler/mistral.rs/pull/2428), which was open
-and unmerged when checked on 2026-10-04. The MCP response work is tracked under
+and unmerged when checked on 2026-10-04 (the PR's branch still targets the prior
+0.9.3 baseline). The local 0.9.4 integration retains the shutdown patch because
+the stable release has not incorporated it. The MCP response work is tracked under
 `20260929-INVOCATION-STREAM-BOUNDARY`. The parent integration task records the
 actual consumer results; source formatting alone is not completed verification.
