@@ -1,4 +1,4 @@
-# Engine shutdown and MCP HTTP responses for Syzygy
+# Engine shutdown, MCP HTTP responses, and build metadata for Syzygy
 
 Upstream baseline: [v0.9.4](https://github.com/EricLBuehler/mistral.rs/releases/tag/v0.9.4), commit
 `4400935451da5e2dc7379a3f92fbbada66557f6c`, the latest stable release checked
@@ -60,6 +60,27 @@ comments and notifications. Initialization notifications also reject HTTP
 failure statuses. This is one finite HTTP RPC exchange; MCP session management,
 resumption, and server-initiated request handling are outside this patch.
 
+## Git revision build inputs
+
+Upstream `mistralrs-core/build.rs` reads the correct revision through Git but
+emits `rerun-if-changed=.git/HEAD` relative to the core package. That path does
+not exist in this multi-crate checkout, including its submodule layout. Cargo
+treats a missing watched input as stale, rerunning the build script and
+rebuilding consumers even when their inputs are unchanged.
+
+The script now asks Git for the actual HEAD, branch ref, and packed-refs paths,
+including linked worktrees' shared ref storage. It watches only existing
+inputs. When a branch ref is packed, its nearest existing refs directory is
+watched so creating a loose ref also invalidates the revision. Detached HEAD
+needs only its HEAD file. `build.rs` is always watched; a source archive not
+tracked by its enclosing Git repository reports `unknown` without inventing
+missing Git inputs. There is no new build dependency or recursive watch of
+the entire Git metadata directory.
+
+References: [Cargo build-script change detection](https://doc.rust-lang.org/cargo/reference/build-scripts.html#change-detection),
+[Cargo fingerprinting](https://doc.rust-lang.org/nightly/nightly-rustc/cargo/core/compiler/fingerprint/index.html),
+and [Git metadata path resolution](https://git-scm.com/docs/git-rev-parse).
+
 ## Verification
 
 The offline tests in `mistralrs-core/src/tests/shutdown.rs` exercise real standard
@@ -67,6 +88,12 @@ threads and Tokio workers, retained close results, admission fencing, all-engine
 join, resource release ordering, and self-join rejection. Consumer tests in
 `syzygy-local-llm` additionally cover cancelled waiters, disconnected HTTP
 clients, native close failure, counted exclusive leases, and streaming errors.
+
+Run `python3 scripts/test_git_revision.py` from this fork to compile the actual
+build script with `rustc -D warnings` and exercise temporary normal, submodule,
+linked-worktree, detached, packed/loose-ref, and source-archive layouts. It does
+not compile model dependencies. The consumer build must additionally be run
+twice without input changes to verify that Cargo keeps it fresh.
 
 Run the MCP gates from this fork's workspace (its unit tests are not members of
 the parent Syzygy workspace):

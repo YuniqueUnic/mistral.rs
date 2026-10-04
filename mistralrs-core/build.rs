@@ -299,29 +299,48 @@ fn add_cudnn_link_search() {
 }
 
 fn set_git_revision() {
-    let commit = std::process::Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .ok()
-        .and_then(|output| {
-            if output.status.success() {
-                String::from_utf8(output.stdout).ok()
-            } else {
-                None
-            }
-        })
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "unknown".to_string());
+    println!("cargo:rerun-if-changed=build.rs");
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git").args(args).output().ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        String::from_utf8(output.stdout)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    // An unpacked crate can live inside an unrelated repository.
+    let tracked = git(&["ls-files", "--error-unmatch", "--", "build.rs"]).is_some();
+    let commit = tracked.then(|| git(&["rev-parse", "HEAD"])).flatten();
+    println!(
+        "cargo:rustc-env=MISTRALRS_GIT_REVISION={}",
+        commit.as_deref().unwrap_or("unknown")
+    );
+    if !tracked {
+        return;
+    }
 
-    println!("cargo:rustc-env=MISTRALRS_GIT_REVISION={commit}");
-    println!("cargo:rerun-if-changed=.git/HEAD");
-    if let Ok(head) = std::fs::read_to_string(".git/HEAD") {
-        if let Some(ref_path) = head.strip_prefix("ref:") {
-            let ref_path = ref_path.trim();
-            if !ref_path.is_empty() {
-                println!("cargo:rerun-if-changed=.git/{}", ref_path);
+    let git_path = |name: &str| {
+        git(&["rev-parse", "--path-format=absolute", "--git-path", name])
+            .map(std::path::PathBuf::from)
+    };
+    if let Some(head) = git_path("HEAD").filter(|path| path.is_file()) {
+        println!("cargo:rerun-if-changed={}", head.display());
+    }
+    if let Some(reference) = git(&["symbolic-ref", "--quiet", "HEAD"]) {
+        if let (Some(path), Some(refs)) = (git_path(&reference), git_path("refs")) {
+            // A packed branch can become loose without changing HEAD or packed-refs.
+            if let Some(watched) = path
+                .ancestors()
+                .take_while(|ancestor| ancestor.starts_with(&refs))
+                .find(|ancestor| ancestor.exists())
+            {
+                println!("cargo:rerun-if-changed={}", watched.display());
             }
+        }
+        if let Some(packed) = git_path("packed-refs").filter(|path| path.is_file()) {
+            println!("cargo:rerun-if-changed={}", packed.display());
         }
     }
 }
