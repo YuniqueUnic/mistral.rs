@@ -17,6 +17,7 @@ async-trait.workspace = true
 image.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+sse-stream = "0.3.0"
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 rust-mcp-schema.workspace = true
@@ -34,3 +35,4 @@ utoipa = ["dep:utoipa"]
 
 [dev-dependencies]
 tokio-test = "0.4"
+wiremock = "0.6"

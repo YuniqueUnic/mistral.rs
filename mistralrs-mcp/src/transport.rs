@@ -1,3 +1,5 @@
+pub(crate) mod http_response;
+
 use anyhow::Result;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
@@ -190,64 +192,6 @@ impl HttpTransport {
             request_id: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1)),
         })
     }
-
-    /// Parse Server-Sent Events response to extract JSON-RPC message
-    ///
-    /// Handles SSE format used by some MCP servers for streaming responses.
-    /// SSE format: `data: <json>\n\n` or `event: <type>\ndata: <json>\n\n`
-    ///
-    /// # Arguments
-    ///
-    /// * `sse_text` - Raw SSE response text from the server
-    ///
-    /// # Returns
-    ///
-    /// Parsed JSON value from the SSE data field
-    ///
-    /// # Errors
-    ///
-    /// - No valid JSON data found in SSE response
-    /// - Malformed SSE format
-    /// - JSON parsing errors
-    fn parse_sse_response(sse_text: &str) -> Result<Value> {
-        // SSE format: data: <json>\n\n or event: <type>\ndata: <json>\n\n
-        let mut json_data = None;
-
-        for line in sse_text.lines() {
-            let line = line.trim();
-
-            // Skip empty lines and comments
-            if line.is_empty() || line.starts_with(':') {
-                continue;
-            }
-
-            // Parse SSE field
-            if let Some((field, value)) = line.split_once(':') {
-                let field = field.trim();
-                let value = value.trim();
-
-                match field {
-                    "data" => {
-                        // Try to parse the JSON data
-                        if let Ok(parsed) = serde_json::from_str::<Value>(value) {
-                            json_data = Some(parsed);
-                            break;
-                        }
-                    }
-                    "event" => {
-                        // Handle different event types if needed
-                        continue;
-                    }
-                    _ => {
-                        // Ignore other SSE fields like id, retry, etc.
-                        continue;
-                    }
-                }
-            }
-        }
-
-        json_data.ok_or_else(|| anyhow::anyhow!("No valid JSON data found in SSE response"))
-    }
 }
 
 #[async_trait::async_trait]
@@ -303,7 +247,7 @@ impl McpTransport for HttpTransport {
     /// }
     /// ```
     async fn send_request(&self, method: &str, params: Value) -> Result<Value> {
-        let (_, request_body) = build_jsonrpc_request(&self.request_id, method, params);
+        let (id, request_body) = build_jsonrpc_request(&self.request_id, method, params);
 
         let mut request_builder = self
             .client
@@ -318,23 +262,7 @@ impl McpTransport for HttpTransport {
 
         let response = request_builder.send().await?;
 
-        // Check content type and handle accordingly
-        let content_type = response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-
-        let response_body: Value = if content_type.contains("text/event-stream") {
-            // Handle Server-Sent Events
-            let response_text = response.text().await?;
-            Self::parse_sse_response(&response_text)?
-        } else {
-            // Handle regular JSON response
-            response.json().await?
-        };
-
-        extract_jsonrpc_result(response_body)
+        http_response::read_response(response, id).await
     }
 
     /// Tests the HTTP connection by sending a ping request
@@ -384,7 +312,7 @@ impl McpTransport for HttpTransport {
             request_builder = request_builder.header(key, value);
         }
 
-        request_builder.send().await?;
+        request_builder.send().await?.error_for_status()?;
         Ok(())
     }
 }

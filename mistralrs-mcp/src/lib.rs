@@ -349,3 +349,6 @@ impl Default for McpServerConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
