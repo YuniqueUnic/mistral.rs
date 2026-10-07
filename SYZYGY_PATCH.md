@@ -81,6 +81,14 @@ References: [Cargo build-script change detection](https://doc.rust-lang.org/carg
 [Cargo fingerprinting](https://doc.rust-lang.org/nightly/nightly-rustc/cargo/core/compiler/fingerprint/index.html),
 and [Git metadata path resolution](https://git-scm.com/docs/git-rev-parse).
 
+## Windows portability
+
+`mistralrs-code-exec` gates `SIGINT_GRACE_WAIT` with `cfg(unix)`, matching
+the interrupt implementation that uses it. Windows retains its existing
+process termination behavior without compiling an unused Unix-only constant.
+The non-Unix interrupt branch uses a tail expression, so the Windows build also
+passes `clippy::needless_return` without a lint suppression.
+
 ## Verification
 
 The offline tests in `mistralrs-core/src/tests/shutdown.rs` exercise real standard
