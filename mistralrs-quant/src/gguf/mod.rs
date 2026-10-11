@@ -281,7 +281,8 @@ impl GgufMatMul {
 
     fn add_bias(&self, x: Tensor) -> Result<Tensor> {
         if let Some(ref b) = self.b {
-            x.broadcast_add(b)
+            // Stored bias and kernel activations can use different floating-point types.
+            x.broadcast_add(&b.to_dtype(x.dtype())?)
         } else {
             Ok(x)
         }
@@ -499,19 +500,15 @@ impl QuantMethod for GgufMatMul {
         #[cfg(not(feature = "cuda"))]
         let res = cpu::cpu_indexed_moe_forward(&self.w, x, indices)?;
 
-        if let Some(b) = &self.b {
-            if b.rank() == 2 {
-                let mut shape = indices.dims().to_vec();
-                shape.push(b.dim(1)?);
-                let bias = b
-                    .index_select(&indices.flatten_all()?, 0)?
-                    .reshape(Shape::from(shape))?;
-                res.broadcast_add(&bias)
-            } else {
-                res.broadcast_add(b)
-            }
+        if let Some(b) = self.b.as_ref().filter(|bias| bias.rank() == 2) {
+            let mut shape = indices.dims().to_vec();
+            shape.push(b.dim(1)?);
+            let bias = b
+                .index_select(&indices.flatten_all()?, 0)?
+                .reshape(Shape::from(shape))?;
+            res.broadcast_add(&bias.to_dtype(res.dtype())?)
         } else {
-            Ok(res)
+            self.add_bias(res)
         }
     }
 

@@ -1,9 +1,10 @@
-# Engine shutdown, MCP HTTP responses, and build metadata for Syzygy
+# Engine shutdown, GGUF bias, MCP HTTP responses, and build metadata for Syzygy
 
 Upstream baseline: [v0.9.4](https://github.com/EricLBuehler/mistral.rs/releases/tag/v0.9.4), commit
 `4400935451da5e2dc7379a3f92fbbada66557f6c`, the latest stable release checked
-on 2026-10-04. The SDK and its sibling crates remain at 0.9.4. No model
-algorithm, scheduler, or tensor implementation is changed by these patches.
+on 2026-10-04. The SDK and its sibling crates remain at 0.9.4. The patches
+preserve model algorithms and scheduling; the GGUF correction below aligns
+bias with the kernel result at the existing affine-operation boundary.
 
 ## Problem and boundary
 
@@ -88,6 +89,24 @@ the interrupt implementation that uses it. Windows retains its existing
 process termination behavior without compiling an unused Unix-only constant.
 The non-Unix interrupt branch uses a tail expression, so the Windows build also
 passes `clippy::needless_return` without a lint suppression.
+
+## GGUF bias dtype boundary
+
+On Metal, `QuantMethod::forward` converts GGUF activations to F32 before the
+quantized kernel, while the loader can materialize bias in BF16. Qwen2.5's
+Q/K/V projections therefore failed with `dtype mismatch in add` before emitting
+text. UQFF and ISQ also preserve bias storage dtype independently of activations.
+
+`GgufMatMul` now converts bias to the actual result dtype at addition. Ordinary
+and indexed expert projections obey the same rule; the latter select the expert
+bias before conversion. This preserves kernel selection, the generic activation
+contract and its output conversion, and stored bias. It adds no model/device
+special case, global precision override, or cache. The consumer cannot repair
+this private intermediate operation through `GgufModelBuilder`.
+
+Remove this fork correction when the adopted upstream implementation enforces
+the same bias/result dtype contract and passes the actual Qwen2.5 GGUF Metal
+inference, repeat-request, shutdown and reload checks.
 
 ## Verification
 
